@@ -552,6 +552,13 @@ namespace WpfApp2
         /// </summary>
         private void ScreeningFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            // Ha a dátumválasztó aktív volt, töröljük az értékét
+            if (ScreeningDatePicker.SelectedDate != null)
+            {
+                ScreeningDatePicker.SelectedDate = null;
+                ClearDateFilterButton.Visibility = Visibility.Collapsed;
+            }
+
             if (ScreeningFilterComboBox.SelectedItem is Movie selectedMovie)
             {
                 if (selectedMovie.Id == 0) // "Összes film" opció
@@ -565,6 +572,96 @@ namespace WpfApp2
                         .OrderBy(s => s.Time)
                         .ToList();
                     UpdateScreeningUI(filteredScreenings);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A dátumválasztó (DatePicker) eseménykezelője.
+        /// A kiválasztott dátum alapján szűri a vetítések listáját.
+        /// </summary>
+        private async void ScreeningDatePicker_SelectedDateChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ScreeningDatePicker.SelectedDate.HasValue)
+            {
+                // Ha a filmválasztó aktív, visszaállítjuk "Összes film"-re
+                if (ScreeningFilterComboBox.SelectedIndex != 0)
+                {
+                    ScreeningFilterComboBox.SelectedIndex = 0;
+                }
+
+                ClearDateFilterButton.Visibility = Visibility.Visible;
+                string dateString = ScreeningDatePicker.SelectedDate.Value.ToString("yyyy-MM-dd");
+
+                try
+                {
+                    var res = await client.GetAsync($"/api/screenings/date/{dateString}");
+                    if (res.IsSuccessStatusCode)
+                    {
+                        var json = await res.Content.ReadAsStringAsync();
+                        var filteredScreenings = JsonConvert.DeserializeObject<List<Screening>>(json, jsonSerializerSettings) ?? new List<Screening>();
+                        PopulateScreeningMovieTitles(); // Hozzárendeljük a filmcímeket
+                        UpdateScreeningUI(filteredScreenings);
+                    }
+                    else
+                    {
+                        MessageBox.Show($"Vetítések lekérése dátum alapján sikertelen: {res.StatusCode}", "Hiba", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Kivétel a dátumszűrés során: {ex.Message}", "Hiba", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A "Dátumszűrő törlése" gomb eseménykezelője.
+        /// </summary>
+        private void ClearDateFilterButton_Click(object sender, RoutedEventArgs e)
+        {
+            ScreeningDatePicker.SelectedDate = null;
+            ClearDateFilterButton.Visibility = Visibility.Collapsed;
+            UpdateScreeningUI(); // Visszaállítja a teljes listát
+        }
+
+        /// <summary>
+        /// A vetítések listájában lévő "Részletek" gomb eseménykezelője.
+        /// Megjelenít egy MessageBox-ot a vetítés részletes adataival.
+        /// </summary>
+        private async void ScreeningDetailsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.DataContext is Screening screening)
+            {
+                try
+                {
+                    var res = await client.GetAsync($"/api/screenings/details/{screening.Id}");
+                    if (res.IsSuccessStatusCode)
+                    {
+                        var json = await res.Content.ReadAsStringAsync();
+                        var detailedScreening = JsonConvert.DeserializeObject<Screening>(json, jsonSerializerSettings);
+
+                        if (detailedScreening != null && detailedScreening.Movie != null)
+                        {
+                            // Formázott üzenet összeállítása
+                            var message = new StringBuilder();
+                            message.AppendLine($"Film: {detailedScreening.Movie.Title} ({detailedScreening.Movie.Year})");
+                            message.AppendLine($"Időpont: {detailedScreening.Time:yyyy. MMMM dd., HH:mm}");
+                            message.AppendLine($"Terem: {detailedScreening.Room}");
+                            message.AppendLine($"\nLeírás:\n{detailedScreening.Movie.Description}");
+                            message.AppendLine($"\nLétrehozta: {detailedScreening.AdminName}");
+
+                            MessageBox.Show(message.ToString(), "Vetítés Részletei", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                    }
+                    else
+                    {
+                        MessageBox.Show("A vetítés részleteinek lekérése sikertelen.", "Hiba", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Kivétel a részletek lekérésekor: {ex.Message}", "Hiba", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -810,6 +907,8 @@ namespace WpfApp2
         public string AdminName { get; set; }
         // Ez a tulajdonság csak a kliensoldalon létezik a könnyebb megjelenítés érdekében.
         public string MovieTitle { get; set; }
+        // A részletes nézethez a backend beágyazza a teljes film objektumot.
+        public Movie Movie { get; set; }
         // Ez a "számított" tulajdonság egy formázott stringet ad vissza a UI-on való megjelenítéshez.
         public string DisplayInfo => $"{MovieTitle} - {Room} terem - {Time:yyyy. MM. dd. HH:mm}";
     }
